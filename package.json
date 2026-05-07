@@ -1,0 +1,15 @@
+{
+  "name": "langbot-openclaw-bridge",
+  "version": "0.1.0",
+  "description": "Bridge service connecting LangBot (WeChat group) to OpenClaw Gateway",
+  "main": "bridge.js",
+  "scripts": {
+    "start": "node bridge.js",
+    "dev": "node bridge.js --mock"
+  },
+  "author": "chickenleg-bot <760792776@qq.com>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

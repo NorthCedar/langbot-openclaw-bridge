@@ -1,0 +1,21 @@
+[Unit]
+Description=LangBot-OpenClaw Bridge
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /root/.openclaw/workspace/langbot-bridge/bridge.js
+WorkingDirectory=/root/.openclaw/workspace/langbot-bridge
+EnvironmentFile=/root/.openclaw/workspace/langbot-bridge/.env
+Restart=always
+RestartSec=3
+StartLimitBurst=5
+StartLimitIntervalSec=60
+Environment=NODE_ENV=production
+
+# Resource limits
+MemoryMax=128M
+CPUQuota=50%
+
+[Install]
+WantedBy=default.target
