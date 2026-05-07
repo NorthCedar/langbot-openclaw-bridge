@@ -1,5 +1,6 @@
 # Sensitive / local
 .env
+.wx-credentials.json
 config.local.json
 
 # Logs

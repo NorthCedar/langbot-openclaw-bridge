@@ -1,387 +1,106 @@
-# LangBot-OpenClaw Bridge 设计文档
+# 微信群聊 AI 接入 — 设计文档
 
-## 概述
+## 需求
 
-将 LangBot（Windows）收到的个人微信群消息，通过 HTTP 桥接服务转发到 OpenClaw Gateway（Ubuntu），实现"黄金藤椒大鸡腿"以完整能力（记忆、技能、工具调用、cron）参与个人微信群聊。
+将 OpenClaw Agent（完整能力：记忆、技能、工具调用、cron）接入个人微信群聊。
 
-## 架构
+**硬性要求：**
+- 用个人微信号（小号）进群，群里 @它 能回复
+- Agent 回复必须走 OpenClaw Gateway，不是简单文本转发
+- 不依赖企业微信 / 公众号
+- 部署在现有腾讯云 Ubuntu 服务器（广州机房）
 
-```
-┌──────────────┐          ┌──────────────────────┐          ┌─────────────────┐
-│  个人微信群   │  ←───→   │  LangBot (Windows)    │  ──POST→  │  Bridge (Ubuntu) │
-│  (群消息收发) │          │  n8n Webhook runner   │  ←JSON──  │  HTTP Server     │
-└──────────────┘          └──────────────────────┘          └────────┬────────┘
-                                                                     │ CLI/子进程
-                                                                     ▼
-                                                            ┌─────────────────┐
-                                                            │ OpenClaw Gateway │
-                                                            │ (完整 Agent)     │
-                                                            └─────────────────┘
-```
+## 方案调研 & 试错记录
 
-## 设计原则
+### ❌ 方案 1：openclaw-weixin 插件
 
-1. **轻量** — 单文件服务，最少依赖，内存占用 < 30MB
-2. **稳定** — 无状态设计，崩溃自动恢复，不影响 Gateway 主进程
-3. **安全** — 最小权限，token 不外泄，请求验证
-4. **可观测** — 结构化日志，关键指标可追踪
+- **原理**：OpenClaw 自带微信插件
+- **结论**：**不支持群聊**，仅支持单聊
+- **验证方式**：文档确认
 
-## 网络拓扑
+### ❌ 方案 2：LangBot + n8n Webhook Pipeline
 
-| 组件 | 位置 | 地址 |
-|------|------|------|
-| LangBot | Windows 主机 | `<win-ip>:5300`（管理面板） |
-| Bridge 服务 | Ubuntu 服务器 | `0.0.0.0:8780`（对外接收 Webhook） |
-| OpenClaw Gateway | Ubuntu 服务器 | `127.0.0.1:39922`（本机 WebSocket） |
+- **原理**：LangBot(Win) 接微信 → Pipeline 设为 n8n Webhook → POST 到 Ubuntu Bridge → 调 OpenClaw
+- **结论**：**LangBot 面板无 Webhook Pipeline 选项**。唯一的微信适配器走的是 openclaw-weixin (ilinkai.weixin.qq.com)，不暴露自定义转发配置
+- **验证方式**：实际进入 LangBot 管理面板确认
+- **教训**：未验证"面板有这个选项"就设计了整套架构
 
-## 消息流
+### ❌ 方案 3：GeWeChat Docker（iPad 协议）
 
-### 入站（群消息 → OpenClaw）
+- **原理**：Docker 容器跑微信 iPad 协议，REST API 收发消息，Bridge 接收回调
+- **结论**：**设备库域名 `devicelibrary.cn2.luto.cc` 已下线（DNS NXDomain）**，pact 服务无法启动，登录流程完全不可用
+- **验证方式**：实际部署 Docker，tcpdump 抓包确认 DNS 解析失败
+- **教训**：未提前检查项目活跃度和外部服务可用性
 
-1. LangBot 收到微信群消息
-2. LangBot Pipeline（n8n Webhook runner）POST 到 Bridge：
-   ```
-   POST http://<ubuntu-ip>:8780/webhook/langbot
-   Content-Type: application/json
-   ```
-3. Bridge 校验请求合法性（IP/Token）
-4. Bridge 调用 `openclaw agent` CLI 注入消息，指定 session-id 实现群隔离
-5. Bridge 等待 CLI 返回 Agent 回复（--json 模式）
-6. Bridge 返回 HTTP Response 给 LangBot
-7. LangBot 将回复发送到微信群
+### ❌ 方案 4：weixin-bot-sdk（iLink Bot API）
 
-### 与 Gateway 通信方式
+- **原理**：微信官方 iLink Bot API，Node.js SDK，扫码即用
+- **结论**：**iLink Bot 是独立 Bot 身份，不是个人号登录，不能被拉进微信群**
+- **验证方式**：实际运行出二维码后，分析 API 文档确认其为 Bot 通道而非个人号通道
+- **教训**：看到"零封号""官方 API"就推荐，没确认"能不能进群"
 
-**选择 CLI 子进程（`openclaw agent`）而非 WebSocket 直连：**
+### ✅ 方案 5：wechatbot-webhook（web 微信协议）— 待部署验证
 
-| 对比 | CLI 子进程 | WebSocket 直连 |
-|------|-----------|---------------|
-| 复杂度 | 低，调用一个命令 | 高，需实现协议 |
-| 稳定性 | 高，无连接状态维护 | 需心跳/重连逻辑 |
-| 兼容性 | 随 OpenClaw 升级自动兼容 | 协议变更需同步改 |
-| 性能开销 | 每次 fork 一个进程（~50ms） | 长连接，零 fork |
-| 适用场景 | 群聊消息（QPS < 1） | 高频消息流 |
+- **原理**：基于 wechaty（web 微信协议），Docker 部署，个人号扫码登录，收到消息 POST 到外部 webhook URL
+- **代码确认**：
+  - `src/wechaty/init.js`：底层用 WechatyBuilder，监听 `message` 事件，有 `room-join`/`room-leave` 事件处理
+  - `src/service/msgUploader.js`：收到消息后 POST 到 `RECVD_MSG_API`，payload 包含 `source.room`（群信息含 memberList）、`source.from`（发送者）、消息内容
+  - 支持返回 response 快捷回复
+- **已确认能力**：收群消息 ✅、发送者识别 ✅、webhook 转发 ✅、Docker 部署 ✅
+- **已知限制**：
+  - 基于 web 微信协议，**约 2 天掉线一次**需重新扫码
+  - 部分微信号无法登录 web 微信（新号/被限制的号）
+  - 不支持发语音、自定义表情等高级功能
+- **状态**：待实际部署验证
 
-群聊场景 QPS 极低（远 < 1/s），CLI 方式的 50ms fork 开销可忽略。
+## 方案对比
 
-### 入站格式
+| 维度 | LangBot | GeWeChat | iLink Bot | wechatbot-webhook |
+|------|---------|----------|-----------|-------------------|
+| 个人号进群 | ❓ 未验证 | ✅ 设计上支持 | ❌ 不支持 | ✅ 代码确认 |
+| 服务可用 | ✅ | ❌ 设备库下线 | ✅ | ✅ |
+| Webhook 转发 | ❌ 无此选项 | ✅ 回调机制 | ❌ 非此用途 | ✅ RECVD_MSG_API |
+| 封号风险 | 低(iPad) | 中(iPad) | 无 | 中(web协议) |
+| 稳定性 | — | — | 高 | 低(~2天掉线) |
+| 部署复杂度 | 高(Win+Ubuntu) | 高(Docker+MySQL+Redis) | 低(npm) | 中(Docker) |
+| 项目活跃度 | 活跃 | ❌ 停止维护 | 活跃 | 活跃(2024.12最后更新) |
+| 是否需要 Windows | 是 | 否 | 否 | 否 |
 
-LangBot POST body（n8n Webhook 标准格式）：
-```json
-{
-  "message": "用户发送的消息文本",
-  "session_id": "group_<group_id>",
-  "launcher_type": "group",
-  "launcher_id": "<group_id>",
-  "sender_id": "<sender_wxid>",
-  "sender_name": "发送者昵称",
-  "group_name": "群名称",
-  "msg_create_time": 1678000000
-}
-```
-
-### 出站格式
-
-Bridge 返回给 LangBot：
-```json
-{
-  "text": "Agent 的回复文本"
-}
-```
-
-## 身份识别方案
-
-### 群聊会话隔离
-
-每个微信群对应一个独立的 OpenClaw session：
-```
-session-id: langbot-bridge:group:<group_id>
-```
-
-CLI 调用示例：
-```bash
-openclaw agent \
-  --session-id "langbot-bridge:group:12345678" \
-  --message "[sender_name] 说：消息内容" \
-  --json
-```
-
-### 发送者标识
-
-消息注入时在 message 前缀中携带发送者信息：
-```
-[张三@某群] 今天股市怎么样
-```
-
-OpenClaw Agent 通过消息前缀区分「谁在说话」。
-
-### 与私聊会话的隔离
-
-- 群聊 session-id 带 `langbot-bridge:group:` 前缀
-- 私聊走原有 `openclaw-weixin` channel
-- 两者完全独立，不会串
-
-## 稳定性设计
-
-### 超时控制
+## 方案 5 架构（待实施）
 
 ```
-┌─────────────────────────────────────────────────┐
-│           LangBot HTTP 超时: 120s               │
-│  ┌───────────────────────────────────────────┐  │
-│  │      Bridge → CLI 超时: 90s               │  │
-│  │  ┌─────────────────────────────────────┐  │  │
-│  │  │   Gateway Agent 处理: ≤ 60s         │  │  │
-│  │  └─────────────────────────────────────┘  │  │
-│  └───────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────┘
+┌──────────────┐  RECVD_MSG_API POST  ┌──────────────────┐  CLI  ┌──────────────┐
+│  wechatbot-  │ ──────────────────→  │  Bridge          │ ────→ │  OpenClaw    │
+│  webhook     │ ←── HTTP response ── │  (Node.js)       │ ←──── │  Gateway     │
+│  (Docker)    │                      │  port 8780       │       │  port 39922  │
+│  port 3001   │                      └──────────────────┘       └──────────────┘
+└──────────────┘
+      ↕
+  个人微信群
 ```
 
-- LangBot HTTP timeout: **120s**（给足余量）
-- Bridge CLI timeout: **90s**（`--timeout 90`）
-- Gateway Agent 内部: 默认 60s
-- 超时后 Bridge 返回降级回复，不挂起
+**消息流：**
+1. 群内有人发消息
+2. wechatbot-webhook 通过 web 微信协议收到
+3. POST 到 Bridge (`RECVD_MSG_API=http://127.0.0.1:8780/webhook`)
+4. Bridge 解析消息（提取群ID、发送者、内容）
+5. Bridge 调用 `openclaw agent --session-id "wechat-bridge:group:<roomId>" --message "..." --json`
+6. Agent 回复返回
+7. Bridge 通过 HTTP response 返回回复文本（wechatbot-webhook 的快捷回复机制）
+8. wechatbot-webhook 将回复发到群
 
-### 并发控制
+**身份隔离：** 每个群独立 session key `wechat-bridge:group:<room_id>`
 
-- 最大并发请求数: **5**（防止 Gateway 过载）
-- 超过上限返回 HTTP 429，LangBot 侧可配重试
-- 实现方式：简单计数器 + Promise
+## 待验证项（方案 5）
 
-### 进程管理（systemd）
+- [ ] 实际 Docker 部署能否正常启动
+- [ ] 小号能否登录 web 微信
+- [ ] 群消息的 webhook payload 具体结构（确认 room/from 字段）
+- [ ] 快捷回复机制是否支持异步（Agent 处理可能 10-60s）
+- [ ] 2 天掉线后重登流程是否可自动化
 
-```ini
-[Unit]
-Description=LangBot-OpenClaw Bridge
-After=network.target openclaw-gateway.service
-Wants=openclaw-gateway.service
+## 环境现状
 
-[Service]
-Type=simple
-ExecStart=/usr/bin/node /root/.openclaw/workspace/langbot-bridge/bridge.js
-Restart=always
-RestartSec=3
-StartLimitBurst=5
-StartLimitIntervalSec=60
-Environment=NODE_ENV=production
-
-# 资源限制
-MemoryMax=128M
-CPUQuota=50%
-
-[Install]
-WantedBy=default.target
-```
-
-### 错误处理策略
-
-| 错误类型 | 处理方式 |
-|---------|---------|
-| CLI 执行超时 | kill 子进程，返回 "处理超时，请稍后再试" |
-| CLI 非零退出 | 记录日志，返回 "服务暂时不可用" |
-| Gateway 不可达 | 记录日志，返回 503 |
-| 请求格式错误 | 返回 400 + 错误描述 |
-| 并发超限 | 返回 429 "繁忙，请稍后" |
-
-### 健康检查
-
-- `GET /health` — 返回服务状态 + Gateway 可达性
-- systemd watchdog: 定期检测进程存活
-- 日志中记录每分钟请求计数和平均响应时间
-
-## 资源占用预估
-
-| 指标 | 预估值 |
-|------|--------|
-| 常驻内存 | ~15MB（Node.js 空载） |
-| 单请求峰值 | +5MB（CLI 子进程临时） |
-| CPU（空闲） | ~0% |
-| CPU（处理中） | < 2%（只是转发） |
-| 磁盘 | 日志 ~1MB/天 |
-| 网络 | 可忽略（本机通信 + 低频 HTTP） |
-
-## 日志
-
-### 路径
-```
-~/.openclaw/workspace/logs/langbot-bridge/
-├── bridge-YYYY-MM-DD.log    # 每日轮转
-```
-
-### 保留策略
-- 保留 **72 小时**（3天，方便排查问题）
-- 每日 00:00 自动清理过期日志
-
-### 日志级别
-
-| 级别 | 记录内容 |
-|------|---------|
-| info | 请求进出、响应时间 |
-| warn | 超时、重试、降级 |
-| error | CLI 失败、未知异常 |
-
-### 日志格式
-每条记录为 JSON line：
-```json
-{
-  "ts": "2026-05-07T13:20:00.000Z",
-  "level": "info",
-  "event": "request",
-  "group_id": "xxx",
-  "group_name": "某群",
-  "sender_id": "wxid_xxx",
-  "sender_name": "张三",
-  "message_preview": "今天股市...",
-  "response_ms": 3200,
-  "status": "ok"
-}
-```
-
-**注意：日志中消息只记前 50 字符（preview），不记全文，减少磁盘和隐私风险。**
-
-## 安全
-
-### 请求验证（三选一，按需配置）
-
-1. **IP 白名单** — 只允许 LangBot 所在 IP
-2. **Bearer Token** — 请求头携带共享密钥
-3. **两者都开** — 最严格
-
-### 其他
-
-- Gateway auth token 仅存在 config.json，不经网络传输（CLI 直接读本地配置）
-- Bridge 不存储任何消息内容（无状态）
-- 群消息中的私人信息不落盘到 MEMORY.md（遵循 AGENTS.md 群聊规则）
-
-## 技术栈
-
-| 项目 | 选择 | 理由 |
-|------|------|------|
-| 语言 | Node.js | 与 OpenClaw 生态一致 |
-| HTTP 框架 | 内置 `http` 模块 | 零额外依赖 |
-| 子进程 | 内置 `child_process` | 调用 `openclaw agent` CLI |
-| 进程管理 | systemd user service | 开机自启，崩溃自动重启，资源限制 |
-| 依赖 | **零 npm 依赖** | 减少供应链风险，降低维护成本 |
-
-## 文件结构
-
-```
-~/.openclaw/workspace/langbot-bridge/
-├── bridge.js            # 主服务（~200行）
-├── config.json          # 配置
-├── package.json         # 元信息（无依赖）
-├── DESIGN.md            # 本文档
-├── README.md
-└── langbot-bridge.service  # systemd unit file
-```
-
-## 配置
-
-运行时通过环境变量或本地 `.env` 文件提供敏感信息，**不入仓库**。
-
-### 环境变量
-
-| 变量 | 说明 | 示例 |
-|------|------|------|
-| `BRIDGE_PORT` | 监听端口 | `8780` |
-| `BRIDGE_AUTH_TOKEN` | LangBot 请求验证密钥 | 随机字符串 |
-| `BRIDGE_ALLOWED_IPS` | 允许的来源 IP（逗号分隔） | `192.168.1.100` |
-| `BRIDGE_TIMEOUT_MS` | CLI 超时（毫秒） | `90000` |
-| `BRIDGE_MAX_CONCURRENCY` | 最大并发数 | `5` |
-
-### config.json（仅非敏感配置，可入仓库）
-
-```json
-{
-  "port": 8780,
-  "gateway": {
-    "timeout_ms": 90000
-  },
-  "concurrency": {
-    "max": 5
-  },
-  "log": {
-    "dir": "./logs",
-    "retention_hours": 72,
-    "message_preview_len": 50
-  }
-}
-```
-
-### .env（本地，不入仓库）
-
-```env
-BRIDGE_AUTH_TOKEN=your-shared-secret
-BRIDGE_ALLOWED_IPS=192.168.1.100,10.0.0.5
-```
-```
-
-## LangBot 端配置
-
-### Pipeline 设置
-
-1. 创建新 Pipeline
-2. AI runner 选择 **n8n Workflow API**
-3. Webhook URL 填：`http://<ubuntu-ip>:8780/webhook/langbot`
-4. Response Mode：同步
-5. Timeout: 120s
-
-### Bot 设置
-
-1. 平台：微信（个人号适配器）
-2. 绑定到上述 Pipeline
-3. 群聊触发规则：
-   - @机器人触发
-   - 或指定关键词前缀
-   - 或白名单群全量触发
-
-## 部署步骤
-
-### Ubuntu 端
-1. 代码已就位：`~/.openclaw/workspace/langbot-bridge/`
-2. 填写 `config.json`（auth token、允许 IP）
-3. 安装 systemd service：
-   ```bash
-   cp langbot-bridge.service ~/.config/systemd/user/
-   systemctl --user daemon-reload
-   systemctl --user enable langbot-bridge
-   systemctl --user start langbot-bridge
-   ```
-4. 验证：`curl http://127.0.0.1:8780/health`
-
-### Windows 端
-1. 部署 LangBot（`uvx langbot`）
-2. 配置微信适配器 → 小号扫码
-3. 配置 Pipeline → n8n Webhook → 填 Bridge URL
-4. 把小号拉进目标群
-5. 测试：在群里 @小号 发消息
-
-## 监控与运维
-
-### 日常检查
-```bash
-# 服务状态
-systemctl --user status langbot-bridge
-
-# 最近日志
-tail -20 ~/.openclaw/workspace/logs/langbot-bridge/bridge-$(date +%Y-%m-%d).log
-
-# 健康检查
-curl http://127.0.0.1:8780/health
-```
-
-### 常见问题排查
-
-| 现象 | 排查 |
-|------|------|
-| 群里发消息无回复 | 1. LangBot 是否在线 2. Bridge 日志有无请求 3. health 端点是否正常 |
-| 回复很慢（>30s） | 看 response_ms，可能 Gateway Agent 处理重（工具调用多） |
-| 间歇性 503 | Gateway 可能重启了，Bridge 会自动重试 |
-
-## 后续扩展
-
-- [ ] 支持图片/文件消息透传（Base64 或 URL）
-- [ ] 支持 @特定人回复（LangBot at 格式）
-- [ ] 支持多 Agent 路由（不同群用不同 agent-id）
-- [ ] Gateway HTTP API 可用后可替换 CLI 调用（减少 fork 开销）
-- [ ] LangBot 原生支持 OpenClaw Gateway 后可去掉 Bridge
+- Docker 已安装（v29.4.3）
+- OpenClaw Gateway 运行中（127.0.0.1:39922）
+- Node.js v22.22.2 可用

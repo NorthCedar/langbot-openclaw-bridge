@@ -1,21 +1,17 @@
-# LangBot-OpenClaw Bridge
+# WeChat-OpenClaw Bridge
 
-将 LangBot（Windows）收到的个人微信群消息，通过 HTTP 桥接服务转发到 OpenClaw Gateway（Ubuntu），实现完整 AI Agent 能力参与个人微信群聊。
-
-## 架构
-
-```
-微信群 → LangBot (Win) → HTTP Webhook → Bridge (Ubuntu) → OpenClaw Gateway → 完整 Agent 处理 → 回复
-```
-
-## 文档
-
-- [DESIGN.md](./DESIGN.md) — 详细设计文档
+将 OpenClaw Agent 完整能力接入个人微信群聊的桥接服务。
 
 ## 状态
 
-🚧 开发中
+🚧 **方案选型中** — 详见 [DESIGN.md](./DESIGN.md)
 
-## License
+## 目标
 
-MIT
+- 个人微信小号进群，@它时调用 OpenClaw Agent 回复
+- Agent 具备完整能力（记忆、技能、工具调用、cron）
+- 部署在 Ubuntu 服务器，无需 Windows
+
+## 当前进展
+
+已调研并排除 4 个不可行方案，确定 wechatbot-webhook (web 微信协议) 为待验证方案。
