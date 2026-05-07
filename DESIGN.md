@@ -202,3 +202,4 @@ OpenClaw Agent 通过 inbound context 区分「来自哪个群」和「谁在说
 2. 配置微信适配器 → 小号扫码
 3. 配置 Pipeline → n8n Webhook → 填 Bridge URL
 4. 把小号拉进目标群
+
