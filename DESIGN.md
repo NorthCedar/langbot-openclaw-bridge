@@ -5,7 +5,8 @@
 将 OpenClaw Agent（完整能力：记忆、技能、工具调用、cron）接入个人微信群聊。
 
 **硬性要求：**
-- 用个人微信号（小号）进群，群里 @它 能回复
+- 用个人微信号（小号）进群，群里 @它 时回复
+- 仅响应 @ 消息，不处理群内所有消息
 - Agent 回复必须走 OpenClaw Gateway，不是简单文本转发
 - 不依赖企业微信 / 公众号
 - 可在任意 Linux 服务器部署（Docker + Node.js）
@@ -90,6 +91,29 @@
 8. wechatbot-webhook 将回复发到群
 
 **身份隔离：** 每个群独立 session key `wechat-bridge:group:<room_id>`
+
+## @ 触发机制
+
+wechatbot-webhook 的 payload 中有 `isMentioned` 字段，但作者注释明确指出：
+
+> `wechaty web版应该都是false`
+
+即 web 微信协议下 `mentionSelf()` 不可靠，`isMentioned` 始终为 "0"。
+
+**解决方案：Bridge 层文本匹配。**
+
+微信群 @ 某人时，消息文本中会包含 `@昵称` 文本（这是微信客户端行为，与协议无关）。Bridge 通过正则匹配判断：
+
+```javascript
+const botName = process.env.BOT_NICKNAME; // 小号在群里的昵称
+const isAtMe = content.includes(`@${botName}`);
+if (!isAtMe) return; // 忽略非 @ 消息
+```
+
+好处：
+- 不依赖 wechaty 的 mentionSelf（web 协议下不工作）
+- 可配置，换号只需改环境变量
+- 群内非 @ 消息不触发 Agent，节省资源
 
 ## 待验证项（方案 5）
 
