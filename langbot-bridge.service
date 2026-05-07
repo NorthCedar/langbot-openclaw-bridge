@@ -1,0 +1,18 @@
+[Unit]
+Description=GeWeChat-OpenClaw Bridge
+After=network.target docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /root/.openclaw/workspace/langbot-bridge/bridge.js
+Restart=always
+RestartSec=3
+StartLimitBurst=5
+StartLimitIntervalSec=60
+EnvironmentFile=/root/.openclaw/workspace/langbot-bridge/.env
+Environment=NODE_ENV=production
+MemoryMax=128M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target
