@@ -94,26 +94,37 @@
 
 ## @ 触发机制
 
-wechatbot-webhook 的 payload 中有 `isMentioned` 字段，但作者注释明确指出：
+wechatbot-webhook 的 payload 中有 `isMentioned` 字段。
 
-> `wechaty web版应该都是false`
+**实际工作原理（源码确认）：**
 
-即 web 微信协议下 `mentionSelf()` 不可靠，`isMentioned` 始终为 "0"。
+1. puppet-wechat4u 不提供 `mentionIdList`
+2. wechaty fallback 到文本解析：用特殊字符 `char(8197)` 分割消息文本，提取 `@昵称`，然后调 `room.memberAll(name)` 匹配群成员
+3. 匹配到当前登录用户则 `mentionSelf()` 返回 true，上报 `isMentioned=1`
 
-**解决方案：Bridge 层文本匹配。**
+**结论：`isMentioned` 字段在 web 协议下可用，但有误触。**
 
-微信群 @ 某人时，消息文本中会包含 `@昵称` 文本（这是微信客户端行为，与协议无关）。Bridge 通过正则匹配判断：
+已知误触场景（[issue #38](https://github.com/danni-cool/wechatbot-webhook/issues/38)）：
+- 有人引用你的消息时，会被判定为 mention
+- 有人复制粘贴了含 `@你` 的文本时，也会触发
+- macOS 端的 @ 分隔符是普通空格，其他端是 `char(8197)`
+
+**对我们的场景：误触可接受。** 引用消息或复制 @ 文本多触发几次不是大问题。
+
+**方案：双层判断**
 
 ```javascript
-const botName = process.env.BOT_NICKNAME; // 小号在群里的昵称
-const isAtMe = content.includes(`@${botName}`);
-if (!isAtMe) return; // 忽略非 @ 消息
+// 优先用 isMentioned 字段（wechaty 文本解析）
+if (payload.isMentioned === '1') {
+  // 处理消息
+}
+// 备用：Bridge 层文本匹配（防止 wechaty 解析失败）
+else if (content.includes(`@${botName}`)) {
+  // 处理消息
+}
 ```
 
-好处：
-- 不依赖 wechaty 的 mentionSelf（web 协议下不工作）
-- 可配置，换号只需改环境变量
-- 群内非 @ 消息不触发 Agent，节省资源
+这样即使 wechaty 的 `mentionSelf()` 在某些情况下失效，Bridge 仍能通过文本匹配捕获。
 
 ## 待验证项（方案 5）
 
