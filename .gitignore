@@ -1,0 +1,12 @@
+# Sensitive / local
+.env
+config.local.json
+
+# Logs
+logs/
+
+# Node
+node_modules/
+
+# OS
+.DS_Store

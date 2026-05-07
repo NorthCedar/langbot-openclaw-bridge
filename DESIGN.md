@@ -275,7 +275,21 @@ WantedBy=default.target
 └── langbot-bridge.service  # systemd unit file
 ```
 
-## config.json
+## 配置
+
+运行时通过环境变量或本地 `.env` 文件提供敏感信息，**不入仓库**。
+
+### 环境变量
+
+| 变量 | 说明 | 示例 |
+|------|------|------|
+| `BRIDGE_PORT` | 监听端口 | `8780` |
+| `BRIDGE_AUTH_TOKEN` | LangBot 请求验证密钥 | 随机字符串 |
+| `BRIDGE_ALLOWED_IPS` | 允许的来源 IP（逗号分隔） | `192.168.1.100` |
+| `BRIDGE_TIMEOUT_MS` | CLI 超时（毫秒） | `90000` |
+| `BRIDGE_MAX_CONCURRENCY` | 最大并发数 | `5` |
+
+### config.json（仅非敏感配置，可入仓库）
 
 ```json
 {
@@ -286,17 +300,20 @@ WantedBy=default.target
   "concurrency": {
     "max": 5
   },
-  "auth": {
-    "mode": "token",
-    "token": "<shared-secret-with-langbot>"
-  },
-  "allowedIPs": ["<langbot-win-ip>"],
   "log": {
-    "dir": "~/.openclaw/workspace/logs/langbot-bridge",
+    "dir": "./logs",
     "retention_hours": 72,
     "message_preview_len": 50
   }
 }
+```
+
+### .env（本地，不入仓库）
+
+```env
+BRIDGE_AUTH_TOKEN=your-shared-secret
+BRIDGE_ALLOWED_IPS=192.168.1.100,10.0.0.5
+```
 ```
 
 ## LangBot 端配置
