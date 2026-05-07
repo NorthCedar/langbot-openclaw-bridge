@@ -1,13 +1,17 @@
 {
   "name": "langbot-openclaw-bridge",
-  "version": "2.0.0",
-  "description": "GeWeChat-OpenClaw Bridge: personal WeChat group chat → OpenClaw Agent",
+  "version": "3.0.0",
+  "description": "WeChat-OpenClaw Bridge via iLink Bot API (weixin-bot-sdk)",
+  "type": "module",
   "main": "bridge.js",
   "scripts": {
     "start": "node bridge.js",
     "mock": "node bridge.js --mock"
   },
-  "keywords": ["wechat", "gewechat", "openclaw", "bridge", "chatbot"],
+  "dependencies": {
+    "weixin-bot-sdk": "^1.1.0"
+  },
+  "keywords": ["wechat", "ilink", "openclaw", "bridge", "chatbot"],
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
