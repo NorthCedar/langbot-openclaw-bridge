@@ -8,7 +8,7 @@
 - 用个人微信号（小号）进群，群里 @它 能回复
 - Agent 回复必须走 OpenClaw Gateway，不是简单文本转发
 - 不依赖企业微信 / 公众号
-- 部署在现有腾讯云 Ubuntu 服务器（广州机房）
+- 可在任意 Linux 服务器部署（Docker + Node.js）
 
 ## 方案调研 & 试错记录
 
@@ -20,7 +20,7 @@
 
 ### ❌ 方案 2：LangBot + n8n Webhook Pipeline
 
-- **原理**：LangBot(Win) 接微信 → Pipeline 设为 n8n Webhook → POST 到 Ubuntu Bridge → 调 OpenClaw
+- **原理**：LangBot(Win) 接微信 → Pipeline 设为 n8n Webhook → POST 到 Bridge 服务器 → 调 OpenClaw
 - **结论**：**LangBot 面板无 Webhook Pipeline 选项**。唯一的微信适配器走的是 openclaw-weixin (ilinkai.weixin.qq.com)，不暴露自定义转发配置
 - **验证方式**：实际进入 LangBot 管理面板确认
 - **教训**：未验证"面板有这个选项"就设计了整套架构
@@ -62,7 +62,7 @@
 | Webhook 转发 | ❌ 无此选项 | ✅ 回调机制 | ❌ 非此用途 | ✅ RECVD_MSG_API |
 | 封号风险 | 低(iPad) | 中(iPad) | 无 | 中(web协议) |
 | 稳定性 | — | — | 高 | 低(~2天掉线) |
-| 部署复杂度 | 高(Win+Ubuntu) | 高(Docker+MySQL+Redis) | 低(npm) | 中(Docker) |
+| 部署复杂度 | 高(Win+Linux) | 高(Docker+MySQL+Redis) | 低(npm) | 中(Docker) |
 | 项目活跃度 | 活跃 | ❌ 停止维护 | 活跃 | 活跃(2024.12最后更新) |
 | 是否需要 Windows | 是 | 否 | 否 | 否 |
 
@@ -72,7 +72,7 @@
 ┌──────────────┐  RECVD_MSG_API POST  ┌──────────────────┐  CLI  ┌──────────────┐
 │  wechatbot-  │ ──────────────────→  │  Bridge          │ ────→ │  OpenClaw    │
 │  webhook     │ ←── HTTP response ── │  (Node.js)       │ ←──── │  Gateway     │
-│  (Docker)    │                      │  port 8780       │       │  port 39922  │
+│  (Docker)    │                      │  port 8780       │       │  OpenClaw    │
 │  port 3001   │                      └──────────────────┘       └──────────────┘
 └──────────────┘
       ↕
@@ -95,12 +95,13 @@
 
 - [ ] 实际 Docker 部署能否正常启动
 - [ ] 小号能否登录 web 微信
+- [ ] 海外服务器 IP 登录是否触发微信异地检测
 - [ ] 群消息的 webhook payload 具体结构（确认 room/from 字段）
 - [ ] 快捷回复机制是否支持异步（Agent 处理可能 10-60s）
 - [ ] 2 天掉线后重登流程是否可自动化
 
-## 环境现状
+## 环境需求
 
-- Docker 已安装（v29.4.3）
-- OpenClaw Gateway 运行中（127.0.0.1:39922）
-- Node.js v22.22.2 可用
+- Docker
+- Node.js >= 18
+- OpenClaw Gateway 运行中

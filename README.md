@@ -10,7 +10,7 @@
 
 - 个人微信小号进群，@它时调用 OpenClaw Agent 回复
 - Agent 具备完整能力（记忆、技能、工具调用、cron）
-- 部署在 Ubuntu 服务器，无需 Windows
+- 部署在 Linux 服务器，无需 Windows
 
 ## 当前进展
 
