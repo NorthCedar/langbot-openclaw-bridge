@@ -15,6 +15,32 @@
 const http = require('http');
 const { execFile } = require('child_process');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+
+// ---------------------------------------------------------------------------
+// .env loader (zero-dependency; only sets keys not already in process.env)
+// ---------------------------------------------------------------------------
+(function loadEnv(envPath) {
+  if (!fs.existsSync(envPath)) return;
+  const lines = fs.readFileSync(envPath, 'utf8').split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    let value = trimmed.slice(eqIdx + 1).trim();
+    // strip surrounding quotes
+    if ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (key && !(key in process.env)) {
+      process.env[key] = value;
+    }
+  }
+})(path.join(__dirname, '.env'));
 
 // ---------------------------------------------------------------------------
 // Configuration
