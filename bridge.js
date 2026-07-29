@@ -13,7 +13,7 @@
 'use strict';
 
 const http = require('http');
-const { execFile } = require('child_process');
+const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -192,25 +192,35 @@ function runOpenClawAgent(sessionId, message, requestId) {
   });
 
   return new Promise((resolve, reject) => {
-    const child = execFile(OPENCLAW_CLI, args, {
-      timeout: CLI_TIMEOUT_MS,
-      maxBuffer: 2 * 1024 * 1024, // 2 MB
+    const child = spawn(OPENCLAW_CLI, args, {
       env: { ...process.env },
+      stdio: ['ignore', 'pipe', 'pipe'], // stdin ignored, stdout+stderr piped
     });
 
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
+
+    // Manual timeout (spawn doesn't have a built-in timeout option)
+    const timer = setTimeout(() => {
+      timedOut = true;
+      log('warn', requestId, 'CLI timed out, killing child');
+      child.kill('SIGTERM');
+      // Force kill after 3s if SIGTERM didn't work
+      setTimeout(() => {
+        if (!child.killed) child.kill('SIGKILL');
+      }, 3000).unref();
+    }, CLI_TIMEOUT_MS);
+    timer.unref(); // don't keep process alive just for the timer
 
     child.stdout.on('data', (d) => { stdout += d; });
     child.stderr.on('data', (d) => { stderr += d; });
 
     child.on('error', (err) => {
+      clearTimeout(timer);
       if (err.code === 'ENOENT') {
         log('error', requestId, 'openclaw CLI not found', { path: OPENCLAW_CLI });
         reject(new Error('CLI_NOT_FOUND'));
-      } else if (err.killed) {
-        log('warn', requestId, 'CLI timed out');
-        reject(new Error('TIMEOUT'));
       } else {
         log('error', requestId, 'CLI spawn error', { err: err.message });
         reject(new Error('CLI_ERROR'));
@@ -218,6 +228,13 @@ function runOpenClawAgent(sessionId, message, requestId) {
     });
 
     child.on('close', (code) => {
+      clearTimeout(timer);
+
+      if (timedOut) {
+        reject(new Error('TIMEOUT'));
+        return;
+      }
+
       log('info', requestId, 'CLI exited', { code, stdoutLen: stdout.length });
 
       if (code !== 0 && code !== null) {
