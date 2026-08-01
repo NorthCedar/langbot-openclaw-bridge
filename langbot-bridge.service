@@ -4,13 +4,19 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/root/.nvm/versions/node/v22.22.2/bin/node /root/.openclaw/workspace/langbot-bridge/bridge.js
+ExecStart=NODE_BIN_PLACEHOLDER/node /path/to/langbot-bridge/bridge.js
 Restart=always
 RestartSec=3
-WorkingDirectory=/root/.openclaw/workspace/langbot-bridge
+WorkingDirectory=/path/to/langbot-bridge
 Environment=NODE_ENV=production
-MemoryMax=128M
-CPUQuota=50%
+Environment=BRIDGE_PORT=8780
+Environment=BRIDGE_TOKEN=your-secret-token-here
+Environment=OPENCLAW_CLI=/path/to/openclaw
+Environment=PATH=NODE_BIN_PLACEHOLDER:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=/root
+Environment=NODE_OPTIONS=--max-old-space-size=2048
+MemoryMax=3G
+LimitNOFILE=65536
 
 [Install]
 WantedBy=default.target

@@ -49,7 +49,7 @@ const path = require('path');
 const BRIDGE_PORT = parseInt(process.env.BRIDGE_PORT, 10) || 8780;
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || '';
 const OPENCLAW_CLI = process.env.OPENCLAW_CLI || '/root/.local/share/pnpm/openclaw';
-const CLI_TIMEOUT_MS = 90_000;
+const CLI_TIMEOUT_MS = 300_000; // 5 min — first session init can be slow
 
 const MAX_CONCURRENT = 5;
 
@@ -235,10 +235,10 @@ function runOpenClawAgent(sessionId, message, requestId) {
         return;
       }
 
-      log('info', requestId, 'CLI exited', { code, stdoutLen: stdout.length });
+      log('info', requestId, 'CLI exited', { code, stdoutLen: stdout.length, stderrLen: stderr.length });
 
       if (code !== 0 && code !== null) {
-        log('error', requestId, 'CLI non-zero exit', { code, stderr: stderr.slice(0, 500) });
+        log('error', requestId, 'CLI non-zero exit', { code, stderr: stderr.slice(0, 5000) });
         reject(new Error('CLI_NONZERO'));
         return;
       }
@@ -261,20 +261,37 @@ function runOpenClawAgent(sessionId, message, requestId) {
  * The assistant reply typically has type "assistant" with a "text" property.
  */
 function parseOpenClawOutput(stdout) {
+  // First, try parsing the entire stdout as a single JSON object
+  // (the --json flag outputs a single JSON run result)
+  try {
+    const root = JSON.parse(stdout);
+    if (root.result?.payloads?.[0]?.text) {
+      return root.result.payloads[0].text;
+    }
+    if (root.result?.reply) {
+      return root.result.reply;
+    }
+    if (root.text && typeof root.text === 'string') {
+      return root.text;
+    }
+  } catch {
+    // Not valid JSON as a whole; try line-by-line (NDJSON fallback)
+  }
+
   const lines = stdout.split('\n').filter((l) => l.trim());
 
   for (const line of lines) {
     try {
       const obj = JSON.parse(line);
-      // Try common shapes from the OpenClaw CLI JSON output
       if (obj.type === 'assistant' && obj.text) {
         return obj.text;
       }
       if (obj.reply) {
         return obj.reply;
       }
-      if (obj.text && typeof obj.text === 'string') {
-        return obj.text;
+      // Only match top-level text for NDJSON lines, not nested fields
+      if (obj.text && typeof obj.text === 'string' && !obj.type) {
+        continue; // likely a nested field from a partial JSON snippet; skip
       }
     } catch {
       // Skip non-JSON lines
