@@ -1,0 +1,12 @@
+{
+  "name": "langbot-bridge",
+  "version": "1.0.0",
+  "description": "Lightweight bridge between LangBot webhook and OpenClaw Gateway CLI",
+  "private": true,
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node bridge.js"
+  }
+}
